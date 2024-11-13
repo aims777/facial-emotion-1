@@ -1,0 +1,106 @@
+from flask import Flask, request, jsonify, render_template
+from keras.models import load_model
+from keras.preprocessing.image import img_to_array
+from PIL import Image
+import numpy as np
+
+# Initialize Flask app
+app = Flask(__name__)
+
+# Load the pre-trained model
+MODEL_PATH = 'emotion_model.h5'  # Make sure this path matches your model file location
+model = load_model(MODEL_PATH)
+
+# Emotion labels for the prediction output
+EMOTION_LABELS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/predict', methods=['POST'])
+def predict_emotion():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    
+    file = request.files['file']
+    try:
+        img = Image.open(file).convert('L')  # Convert to grayscale
+        img = img.resize((48, 48))  # Resize to 48x48 pixels as required by the model
+        img = img_to_array(img) / 255.0  # Normalize the image
+        img = np.expand_dims(img, axis=0)  # Add batch dimension
+
+        # Predict emotion
+        predictions = model.predict(img)
+        emotion_index = np.argmax(predictions)
+        emotion_label = EMOTION_LABELS[emotion_index]
+        confidence = float(np.max(predictions))
+        
+        return jsonify({"emotion": emotion_label, "confidence": confidence})
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion Detector</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        .container { margin-top: 50px; }
+        .result { margin-top: 20px; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Emotion Recognition</h1>
+        <p>Upload an image and detect the emotion!</p>
+        <input type="file" id="upload" accept="image/*" />
+        <button onclick="uploadImage()">Upload and Predict</button>
+        <div class="result" id="result"></div>
+    </div>
+    <script>
+        async function uploadImage() {
+            const fileInput = document.getElementById('upload');
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerText = "Processing...";
+
+            const file = fileInput.files[0];
+            if (!file) {
+                resultDiv.innerText = "Please upload an image file.";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    resultDiv.innerText = "Error: " + response.statusText;
+                    return;
+                }
+
+                const result = await response.json();
+                if (result.error) {
+                    resultDiv.innerText = "Error: " + result.error;
+                } else {
+                    resultDiv.innerText = `Emotion: ${result.emotion}, Confidence: ${(result.confidence * 100).toFixed(2)}%`;
+                }
+            } catch (error) {
+                resultDiv.innerText = "An error occurred while processing the image.";
+                console.error(error);
+            }
+        }
+    </script>
+</body>
+</html>
